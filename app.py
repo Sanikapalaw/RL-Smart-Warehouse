@@ -3,102 +3,71 @@ import numpy as np
 import pandas as pd
 import time
 
-# --- SETUP ---
-GRID_SIZE = 6
-GOAL = (5, 5)
-TRAFFIC_LIGHT = (2, 2) # A "red light" obstacle
+# Simulation Settings
+GRID_SIZE = 5
+GOAL = (4, 4)
 
-class SelfDrivingGUI:
+class RobustAgent:
     def __init__(self):
-        # Q-Table (Value Function): [Row, Col, Action(Up, Down, Left, Right)]
+        # Value Function for [Row, Col, Action]
         self.q_table = np.zeros((GRID_SIZE, GRID_SIZE, 4))
-        self.lr = 0.2
+        self.alpha = 0.1 # Learning rate
         self.gamma = 0.9
 
-    def train(self, epochs):
-        for _ in range(epochs):
-            state = (0, 0) # Start at top-left
-            for _ in range(20): # Max steps per epoch
+    def step(self, state, action, signal_working=True):
+        # Uncertain moves (Uncertainty mentioned in Chapter 3)
+        if not signal_working:
+            # If signal is broken, 20% chance the car moves in a random direction
+            if np.random.rand() < 0.2:
                 action = np.random.randint(0, 4)
-                # Apply move
-                new_row, new_col = state
-                if action == 0 and state[0] > 0: new_row -= 1
-                elif action == 1 and state[0] < GRID_SIZE-1: new_row += 1
-                elif action == 2 and state[1] > 0: new_col -= 1
-                elif action == 3 and state[1] < GRID_SIZE-1: new_col += 1
-                
-                # Reward Logic (Learning from Mistakes)
-                if (new_row, new_col) == GOAL:
-                    reward = 100
-                elif (new_row, new_col) == TRAFFIC_LIGHT:
-                    reward = -50 # Penalty for "running the light"
-                else:
-                    reward = -1 # Small movement penalty
-                
-                # Update Value Function (Q-Learning)
-                old_val = self.q_table[state[0], state[1], action]
-                next_max = np.max(self.q_table[new_row, new_col])
-                self.q_table[state[0], state[1], action] = old_val + self.lr * (reward + self.gamma * next_max - old_val)
-                
-                state = (new_row, new_col)
-                if state == GOAL: break
+        
+        new_r, new_c = state
+        if action == 0 and state[0] > 0: new_r -= 1 # Up
+        elif action == 1 and state[0] < GRID_SIZE-1: new_r += 1 # Down
+        elif action == 2 and state[1] > 0: new_c -= 1 # Left
+        elif action == 3 and state[1] < GRID_SIZE-1: new_c += 1 # Right
+        
+        # Reward
+        if (new_r, new_c) == GOAL: reward = 10
+        else: reward = -1
+        
+        return (new_r, new_c), reward
 
-# --- GUI INTERFACE ---
-st.title("🚗 GUI Self-Driving Lab")
-st.markdown("Watching the agent learn from **Value Functions** and **Policy Improvement**.")
+# --- STREAMLIT GUI ---
+st.title("🚗 Self-Driving: Broken Signal Recovery")
 
-if 'rl_agent' not in st.session_state:
-    st.session_state.rl_agent = SelfDrivingGUI()
+if 'car_agent' not in st.session_state:
+    st.session_state.car_agent = RobustAgent()
+    st.session_state.car_pos = (0, 0)
 
-# Sidebar Training
-st.sidebar.header("Training Controls")
-train_epochs = st.sidebar.slider("Epochs (Learning Cycles)", 10, 2000, 100)
-if st.sidebar.button("Train AI Model"):
-    with st.spinner("Agent exploring unknown environment..."):
-        st.session_state.rl_agent.train(train_epochs)
-    st.sidebar.success("Training Finished!")
+# The "Signal Status"
+signal_status = st.toggle("Traffic Signal Working", value=True)
 
-# Drawing the Map
-def draw_grid(car_pos):
+if not signal_status:
+    st.warning("⚠️ Signal is NOT working. Agent is navigating under UNCERTAINTY.")
+
+# Value Function Logic
+if st.button("Move AI One Step"):
+    state = st.session_state.car_pos
+    # Policy: Greedy action based on current Value Function
+    action = np.argmax(st.session_state.car_agent.q_table[state[0], state[1]])
+    
+    # Environment Interaction
+    next_state, reward = st.session_state.car_agent.step(state, action, signal_status)
+    
+    # Policy Improvement (Updating from the "Mistake")
+    old_q = st.session_state.car_agent.q_table[state[0], state[1], action]
+    max_next_q = np.max(st.session_state.car_agent.q_table[next_state[0], next_state[1]])
+    st.session_state.car_agent.q_table[state[0], state[1], action] = old_q + st.session_state.car_agent.alpha * (reward + st.session_state.car_agent.gamma * max_next_q - old_q)
+    
+    st.session_state.car_pos = next_state
+    
+    # Draw Grid
     grid = np.full((GRID_SIZE, GRID_SIZE), "⬜")
     grid[GOAL] = "🏁"
-    grid[TRAFFIC_LIGHT] = "🚦"
-    grid[car_pos] = "🚗"
-    return pd.DataFrame(grid)
-
-# Game Control
-st.subheader("Live Simulation")
-if st.button("Run AI Policy"):
-    curr_pos = (0, 0)
-    placeholder = st.empty()
+    grid[st.session_state.car_pos] = "🏎️"
+    st.table(grid)
     
-    for step in range(15):
-        # Policy Improvement: Select best action from Value Function
-        action = np.argmax(st.session_state.rl_agent.q_table[curr_pos[0], curr_pos[1]])
-        
-        # Calculate new position
-        new_r, new_c = curr_pos
-        if action == 0 and curr_pos[0] > 0: new_r -= 1
-        elif action == 1 and curr_pos[0] < GRID_SIZE-1: new_r += 1
-        elif action == 2 and curr_pos[1] > 0: new_c -= 1
-        elif action == 3 and curr_pos[1] < GRID_SIZE-1: new_c += 1
-        
-        curr_pos = (new_r, new_c)
-        
-        # Update GUI
-        with placeholder.container():
-            st.table(draw_grid(curr_pos))
-            st.write(f"Step: {step+1} | Current Move: {['Up', 'Down', 'Left', 'Right'][action]}")
-        
-        time.sleep(0.5)
-        if curr_pos == GOAL:
-            st.balloons()
-            st.success("Goal Reached!")
-            break
-else:
-    st.table(draw_grid((0, 0)))
-
-st.divider()
-st.subheader("The 'Brain' (Value Function Heatmap)")
-st.write("This shows which areas the car thinks are 'Good' (High numbers) vs 'Dangerous' (Low numbers).")
-st.write(np.max(st.session_state.rl_agent.q_table, axis=2))
+    if next_state == GOAL:
+        st.success("Reached Goal despite signal failure!")
+        st.session_state.car_pos = (0, 0)
