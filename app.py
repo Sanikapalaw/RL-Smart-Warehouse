@@ -1,67 +1,22 @@
-import streamlit as st
-import numpy as np
-import pandas as pd
+import string
+import random
 
-st.set_page_config(page_title="SCM Bandit Game", layout="wide")
+def create_grid(size):
+    return [[random.choice(string.ascii_uppercase) for _ in range(size)] for _ in range(size)]
 
-# --- Title and Intro ---
-st.title("📦 SCM Procurement: The Multi-Armed Bandit Game")
-st.markdown("""
-Based on **Chapter 2 of Sutton & Barto**, this game simulates the **k-armed Bandit problem**.
-**Your Task:** Choose the best supplier to maximize total profit. 
-Some suppliers are consistent; others are risky but high-reward!
-""")
-
-# --- Game Logic / Model Parameters ---
-if 'round' not in st.session_state:
-    st.session_state.round = 1
-    st.session_state.total_profit = 0
-    st.session_state.history = []
-    # Hidden True Means (The "Reality" the player tries to learn)
-    st.session_state.suppliers = {
-        "Supplier A (Local)": {"mean": 50, "std": 5},    # Stable, Low Reward
-        "Supplier B (Global)": {"mean": 70, "std": 20},  # Risky, Medium Reward
-        "Supplier C (Startup)": {"mean": 90, "std": 50}  # Very Risky, High Reward
+def hide_word(grid, word, directions):
+    n = len(grid)
+    dir_map = {
+        "H": (0,1), "V": (1,0),
+        "D1": (1,1), "D2": (1,-1)
     }
 
-# --- Sidebar Stats ---
-st.sidebar.header("Dashboard")
-st.sidebar.metric("Current Round", f"{st.session_state.round} / 20")
-st.sidebar.metric("Total Profit", f"${st.session_state.total_profit:,.0f}")
+    while True:
+        dx, dy = dir_map[random.choice(directions)]
+        x = random.randint(0, n-1)
+        y = random.randint(0, n-1)
 
-if st.session_state.round <= 20:
-    st.subheader(f"Round {st.session_state.round}: Select a Supplier")
-    
-    cols = st.columns(3)
-    
-    for i, (name, stats) in enumerate(st.session_state.suppliers.items()):
-        if cols[i].button(f"Order from {name}"):
-            # Generate reward based on normal distribution (Chapter 2.1)
-            reward = np.random.normal(stats['mean'], stats['std'])
-            st.session_state.total_profit += reward
-            st.session_state.history.append({"Round": st.session_state.round, "Supplier": name, "Profit": reward})
-            st.session_state.round += 1
-            st.rerun()
-
-# --- Visualization (The Learning Process) ---
-if st.session_state.history:
-    df = pd.DataFrame(st.session_state.history)
-    
-    st.divider()
-    st.subheader("Profit Performance")
-    st.line_chart(df.pivot(index='Round', columns='Supplier', values='Profit'))
-
-    # Show Average Reward per 'Arm' (Chapter 2.4 - Action-value Methods)
-    st.subheader("Estimated Supplier Value ($Q_t$)")
-    avg_rewards = df.groupby('Supplier')['Profit'].mean()
-    st.bar_chart(avg_rewards)
-    
-    st.write("This bar chart shows your **Action-Value Estimate ($Q_t(a)$)**. In Chapter 2, RL agents use this to decide which supplier to 'exploit'.")
-
-# --- Reset Game ---
-if st.session_state.round > 20:
-    st.success(f"Game Over! Final Profit: ${st.session_state.total_profit:,.0f}")
-    if st.button("Restart Simulation"):
-        for key in list(st.session_state.keys()):
-            del st.session_state[key]
-        st.rerun()
+        if 0 <= x + dx*(len(word)-1) < n and 0 <= y + dy*(len(word)-1) < n:
+            for i in range(len(word)):
+                grid[x+dx*i][y+dy*i] = word[i]
+            return
