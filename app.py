@@ -1,36 +1,67 @@
 import streamlit as st
-import random
+import numpy as np
+import pandas as pd
 
-st.set_page_config(page_title="Treasure Rooms AI", layout="centered")
-st.title("🎮 Treasure Rooms AI (Associative Search)")
+st.set_page_config(page_title="SCM Bandit Game", layout="wide")
 
-rooms = [0,1,2]
-doors = [0,1,2]
+# --- Title and Intro ---
+st.title("📦 SCM Procurement: The Multi-Armed Bandit Game")
+st.markdown("""
+Based on **Chapter 2 of Sutton & Barto**, this game simulates the **k-armed Bandit problem**.
+**Your Task:** Choose the best supplier to maximize total profit. 
+Some suppliers are consistent; others are risky but high-reward!
+""")
 
-if "Q" not in st.session_state:
-    st.session_state.Q = {r:{d:0.0 for d in doors} for r in rooms}
-    st.session_state.true_best = {0:1, 1:2, 2:0}
-    st.session_state.epsilon = 0.3
-    st.session_state.alpha = 0.1
+# --- Game Logic / Model Parameters ---
+if 'round' not in st.session_state:
+    st.session_state.round = 1
+    st.session_state.total_profit = 0
+    st.session_state.history = []
+    # Hidden True Means (The "Reality" the player tries to learn)
+    st.session_state.suppliers = {
+        "Supplier A (Local)": {"mean": 50, "std": 5},    # Stable, Low Reward
+        "Supplier B (Global)": {"mean": 70, "std": 20},  # Risky, Medium Reward
+        "Supplier C (Startup)": {"mean": 90, "std": 50}  # Very Risky, High Reward
+    }
 
-room = st.selectbox("Choose a Room", rooms)
+# --- Sidebar Stats ---
+st.sidebar.header("Dashboard")
+st.sidebar.metric("Current Round", f"{st.session_state.round} / 20")
+st.sidebar.metric("Total Profit", f"${st.session_state.total_profit:,.0f}")
 
-if st.button("🤖 AI Choose Door"):
-    Q = st.session_state.Q
+if st.session_state.round <= 20:
+    st.subheader(f"Round {st.session_state.round}: Select a Supplier")
+    
+    cols = st.columns(3)
+    
+    for i, (name, stats) in enumerate(st.session_state.suppliers.items()):
+        if cols[i].button(f"Order from {name}"):
+            # Generate reward based on normal distribution (Chapter 2.1)
+            reward = np.random.normal(stats['mean'], stats['std'])
+            st.session_state.total_profit += reward
+            st.session_state.history.append({"Round": st.session_state.round, "Supplier": name, "Profit": reward})
+            st.session_state.round += 1
+            st.rerun()
 
-    if random.random() < st.session_state.epsilon:
-        door = random.choice(doors)
-        mode = "Exploring"
-    else:
-        door = max(Q[room], key=Q[room].get)
-        mode = "Exploiting"
+# --- Visualization (The Learning Process) ---
+if st.session_state.history:
+    df = pd.DataFrame(st.session_state.history)
+    
+    st.divider()
+    st.subheader("Profit Performance")
+    st.line_chart(df.pivot(index='Round', columns='Supplier', values='Profit'))
 
-    reward = 1 if door == st.session_state.true_best[room] else 0
-    Q[room][door] += st.session_state.alpha * (reward - Q[room][door])
+    # Show Average Reward per 'Arm' (Chapter 2.4 - Action-value Methods)
+    st.subheader("Estimated Supplier Value ($Q_t$)")
+    avg_rewards = df.groupby('Supplier')['Profit'].mean()
+    st.bar_chart(avg_rewards)
+    
+    st.write("This bar chart shows your **Action-Value Estimate ($Q_t(a)$)**. In Chapter 2, RL agents use this to decide which supplier to 'exploit'.")
 
-    st.success(f"AI chose Door {door} ({mode})")
-    st.write("Reward:", "💎 Treasure!" if reward==1 else "❌ Empty")
-
-st.subheader("🧠 Learned Preferences")
-for r in rooms:
-    st.write(f"Room {r}:", st.session_state.Q[r])
+# --- Reset Game ---
+if st.session_state.round > 20:
+    st.success(f"Game Over! Final Profit: ${st.session_state.total_profit:,.0f}")
+    if st.button("Restart Simulation"):
+        for key in list(st.session_state.keys()):
+            del st.session_state[key]
+        st.rerun()
