@@ -1,19 +1,18 @@
-# app.py
-import streamlit as st
-import random, string, time
+import random
 import numpy as np
 from collections import defaultdict
 
-# ------------------------
-# LEVEL SETTINGS
-# ------------------------
-LEVELS = {
-    "Easy": {"size": 8, "dirs": ["H", "V"]},
-    "Hard": {"size": 16, "dirs": ["H", "V", "D1", "D2"]},
-    "Advance": {"size": 32, "dirs": ["H", "V", "D1", "D2"]}
-}
+# ---------------------------
+# Environment (Grid World)
+# ---------------------------
+GRID = [
+    ['D','A','T','A'],
+    ['X','X','X','X'],
+    ['X','X','X','X'],
+    ['X','X','X','X']
+]
 
-WORDS = ["DATA", "AI", "MODEL", "RL", "TRAIN", "AGENT"]
+WORD = "DATA"
 
 ACTIONS = {
     0:(-1,0),1:(1,0),2:(0,-1),3:(0,1),
@@ -22,79 +21,56 @@ ACTIONS = {
 
 Q = defaultdict(lambda: np.zeros(8))
 
-alpha, epsilon, episodes = 0.1, 0.3, 1500
+alpha = 0.1
+epsilon = 0.3
+episodes = 1000
 
-# ------------------------
-# GRID
-# ------------------------
-def create_grid(n):
-    return [[random.choice(string.ascii_uppercase) for _ in range(n)] for _ in range(n)]
-
-def hide_word(grid, word, dirs):
-    n=len(grid)
-    dirmap={"H":(0,1),"V":(1,0),"D1":(1,1),"D2":(1,-1)}
-    while True:
-        dx,dy=dirmap[random.choice(dirs)]
-        x=random.randint(0,n-1); y=random.randint(0,n-1)
-        if 0<=x+dx*(len(word)-1)<n and 0<=y+dy*(len(word)-1)<n:
-            for i in range(len(word)):
-                grid[x+dx*i][y+dy*i]=word[i]
-            return
-
-# ------------------------
-# RL
-# ------------------------
-def reward_fn(grid,x,y,nx,ny,word,idx,visited):
-    n=len(grid)
+# ---------------------------
+# Reward Function
+# ---------------------------
+def reward_fn(x,y,nx,ny,idx,visited):
+    n = len(GRID)
     if nx<0 or ny<0 or nx>=n or ny>=n: return -5, idx
     if (nx,ny) in visited: return -3, idx
-    if grid[nx][ny]==word[idx]:
-        if idx==len(word)-1: return 100, idx+1
+    if GRID[nx][ny] == WORD[idx]:
+        if idx == len(WORD)-1:
+            return 100, idx+1
         return 10, idx+1
     return -1, idx
 
+# ---------------------------
+# Policy
+# ---------------------------
 def choose(state):
-    if random.random()<epsilon: return random.randint(0,7)
+    if random.random() < epsilon:
+        return random.randint(0,7)
     return np.argmax(Q[state])
 
-def train(grid, word):
-    n=len(grid)
-    for _ in range(episodes):
-        x=random.randint(0,n-1); y=random.randint(0,n-1)
-        idx=0; visited={(x,y)}
-        for _ in range(200):
-            s=(x,y,idx)
-            a=choose(s)
-            dx,dy=ACTIONS[a]
-            nx,ny=x+dx,y+dy
-            r,new_idx=reward_fn(grid,x,y,nx,ny,word,idx,visited)
-            Q[s][a]+=alpha*(r-Q[s][a])
-            if r>-5:
-                x,y,idx=nx,ny,new_idx
-                visited.add((x,y))
-            if idx==len(word): break
+# ---------------------------
+# Training Loop
+# ---------------------------
+for ep in range(episodes):
+    x,y = random.randint(0,3), random.randint(0,3)
+    idx = 0
+    visited = {(x,y)}
 
-# ------------------------
-# STREAMLIT UI
-# ------------------------
-st.title("🤖 AI Word Search (Reinforcement Learning)")
+    for step in range(50):
+        state = (x,y,idx)
+        action = choose(state)
 
-level = st.selectbox("Choose Level", list(LEVELS.keys()))
-if st.button("Start AI"):
-    cfg = LEVELS[level]
-    grid = create_grid(cfg["size"])
+        dx,dy = ACTIONS[action]
+        nx,ny = x+dx, y+dy
 
-    for w in WORDS:
-        hide_word(grid, w, cfg["dirs"])
+        r,new_idx = reward_fn(x,y,nx,ny,idx,visited)
 
-    word = random.choice(WORDS)
-    st.success(f"AI selected word: {word}")
+        Q[state][action] += alpha * (r - Q[state][action])
 
-    train(grid, word)
+        if r > -5:
+            x,y,idx = nx,ny,new_idx
+            visited.add((x,y))
 
-    st.subheader("Grid")
-    for row in grid:
-        st.write(" ".join(row))
+        if idx == len(WORD):
+            print(f"Episode {ep}: Word Found!")
+            break
 
-    st.balloons()
-    st.success("AI learned how to search! 🎯")
+print("Training finished. Agent learned paths.")
