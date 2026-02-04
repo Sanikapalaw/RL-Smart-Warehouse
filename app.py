@@ -2,112 +2,110 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import time
-import random
+import matplotlib.pyplot as plt
 
-# --- SETUP ---
-GRID_SIZE = 6
-GOAL = (5, 5)
-# Multiple Signals: (Row, Col)
-SIGNALS = [(1, 2), (3, 4), (2, 2)]
+# --- CONSTANTS ---
+GOAL_X = 100.0
+SIGNAL_X = 50.0
+MAX_STEPS = 50
 
-class SelfDrivingGUI:
+class ContinuousCarAgent:
     def __init__(self):
-        # Q-Table (Value Function): [Row, Col, Light_Color, Action]
-        # Actions: 0:Up, 1:Down, 2:Left, 3:Right, 4:Wait
-        self.q_table = np.zeros((GRID_SIZE, GRID_SIZE, 2, 5)) 
-        self.lr = 0.2
-        self.gamma = 0.9
+        # Using a simplified Q-table by binning continuous values
+        # Bins: [Position (10), Velocity (5), Light (2), Action (3)]
+        # Actions: 0: Brake, 1: Coast, 2: Accelerate
+        self.q_table = np.zeros((11, 6, 2, 3)) 
+        self.lr = 0.1
+        self.gamma = 0.95
+
+    def get_bins(self, pos, vel):
+        p_bin = int(min(pos, 99) // 10)
+        v_bin = int(min(max(vel, 0), 4))
+        return p_bin, v_bin
 
     def train(self, epochs):
         for _ in range(epochs):
-            state = (0, 0)
-            light_color = 0 # 0: Green, 1: Red
+            pos, vel = 0.0, 0.0
+            light = 0 # 0: Green, 1: Red
             
-            for _ in range(30):
-                # Random light change to simulate environment uncertainty
-                light_color = 1 if random.random() > 0.7 else 0
+            for _ in range(MAX_STEPS):
+                p_bin, v_bin = self.get_bins(pos, vel)
+                action = np.random.randint(0, 3)
                 
-                action = np.random.randint(0, 5)
-                new_row, new_col = state
+                # Environment Uncertainty (Unpredictable physics)
+                noise = np.random.normal(0, 0.5) 
+                acceleration = (action - 1) * 2.0 + noise
                 
-                # Apply Move Logic
-                if action == 0 and state[0] > 0: new_row -= 1
-                elif action == 1 and state[0] < GRID_SIZE-1: new_row += 1
-                elif action == 2 and state[1] > 0: new_col -= 1
-                elif action == 3 and state[1] < GRID_SIZE-1: new_col += 1
-                # Action 4 is "Wait" - position stays same
+                new_vel = max(0, vel + acceleration)
+                new_pos = pos + new_vel
                 
-                # Reward Logic: Learning from Mistakes
-                if (new_row, new_col) == GOAL:
+                # Reward Logic (Chapter 3)
+                if new_pos >= GOAL_X:
                     reward = 100
-                elif state in SIGNALS and light_color == 1 and action != 4:
-                    reward = -100 # Huge penalty for moving on Red
-                elif state in SIGNALS and light_color == 1 and action == 4:
-                    reward = 20 # Reward for waiting at Red light
+                elif abs(new_pos - SIGNAL_X) < 5 and light == 1 and new_vel > 1:
+                    reward = -200 # Collision/Signal mistake
                 else:
-                    reward = -1
+                    reward = -1 # Efficiency penalty
 
-                # Update Value Function (Q-Learning)
-                old_val = self.q_table[state[0], state[1], light_color, action]
-                next_light = 1 if random.random() > 0.7 else 0
-                next_max = np.max(self.q_table[new_row, new_col, next_light])
+                # Update Value Function
+                next_p, next_v = self.get_bins(new_pos, new_vel)
+                next_light = 1 if np.random.rand() > 0.8 else 0
+                old_val = self.q_table[p_bin, v_bin, light, action]
+                next_max = np.max(self.q_table[next_p, next_v, next_light])
                 
-                self.q_table[state[0], state[1], light_color, action] = \
+                self.q_table[p_bin, v_bin, light, action] = \
                     old_val + self.lr * (reward + self.gamma * next_max - old_val)
                 
-                state = (new_row, new_col)
-                if state == GOAL: break
+                pos, vel = new_pos, new_vel
+                if pos >= GOAL_X: break
 
-# --- GUI INTERFACE ---
-st.title("🚦 Advanced Multi-Signal Driving Lab")
+# --- GUI ---
+st.title("🏎️ Continuous Self-Driving (Unpredictable Env)")
+st.write("No grids here. The car uses physics and probability to learn.")
 
-if 'rl_agent' not in st.session_state:
-    st.session_state.rl_agent = SelfDrivingGUI()
+if 'agent' not in st.session_state:
+    st.session_state.agent = ContinuousCarAgent()
 
-st.sidebar.header("Training Settings")
-train_epochs = st.sidebar.slider("Epochs (Learning Cycles)", 100, 5000, 500)
-if st.sidebar.button("Train AI on Signals"):
-    with st.spinner("Learning the meaning of Green and Red..."):
-        st.session_state.rl_agent.train(train_epochs)
-    st.sidebar.success("Agent Learned!")
+epochs = st.sidebar.number_input("Training Epochs", 100, 10000, 1000)
+if st.sidebar.button("Train Agent"):
+    with st.spinner("Learning physics and signal timing..."):
+        st.session_state.agent.train(epochs)
+    st.sidebar.success("Training Complete!")
 
-def draw_grid(car_pos, current_light_color):
-    grid = np.full((GRID_SIZE, GRID_SIZE), "⬜")
-    grid[GOAL] = "🏁"
-    light_emoji = "🔴" if current_light_color == 1 else "🟢"
-    for s in SIGNALS:
-        grid[s] = light_emoji
-    grid[car_pos] = "🚗"
-    return pd.DataFrame(grid)
-
-st.subheader("Live Simulation")
-if st.button("Start Intelligent Drive"):
-    curr_pos = (0, 0)
+if st.button("Run Continuous Simulation"):
+    pos, vel = 0.0, 0.0
+    history = []
     placeholder = st.empty()
     
-    for step in range(25):
-        # Randomly switch light every few steps
-        light_state = 1 if (step // 3) % 2 == 1 else 0
+    for t in range(MAX_STEPS):
+        # Logic: Switch light every 5 steps
+        light = 1 if (t // 5) % 2 == 1 else 0
+        p_bin, v_bin = st.session_state.agent.get_bins(pos, vel)
         
-        # Policy Improvement: Select best action based on current state AND light color
-        action = np.argmax(st.session_state.rl_agent.q_table[curr_pos[0], curr_pos[1], light_state])
+        # Policy: Best action from Q-table
+        action = np.argmax(st.session_state.agent.q_table[p_bin, v_bin, light])
         
-        move_name = ["Up", "Down", "Left", "Right", "WAITING (Red Light)"][action]
+        # Physics with Noise
+        noise = np.random.normal(0, 0.2)
+        vel = max(0, vel + (action - 1) * 2.0 + noise)
+        pos += vel
         
-        if action != 4:
-            new_r, new_c = curr_pos
-            if action == 0 and curr_pos[0] > 0: new_r -= 1
-            elif action == 1 and curr_pos[0] < GRID_SIZE-1: new_r += 1
-            elif action == 2 and curr_pos[1] > 0: new_c -= 1
-            elif action == 3 and curr_pos[1] < GRID_SIZE-1: new_c += 1
-            curr_pos = (new_r, new_c)
+        history.append({"Time": t, "Position": pos, "Velocity": vel, "Light": "Red" if light else "Green"})
         
-        with placeholder.container():
-            st.table(draw_grid(curr_pos, light_state))
-            st.write(f"Step: {step+1} | Light: {'RED' if light_state == 1 else 'GREEN'} | Action: **{move_name}**")
+        # Draw Visuals
+        fig, ax = plt.subplots(figsize=(10, 2))
+        ax.set_xlim(0, 110)
+        ax.set_ylim(-1, 1)
+        ax.axvline(SIGNAL_X, color='red' if light else 'green', linestyle='--', label="Signal")
+        ax.axvline(GOAL_X, color='gold', linewidth=3, label="Goal")
+        ax.scatter([pos], [0], color='blue', s=200, marker='s', label="Car")
+        ax.legend()
+        placeholder.pyplot(fig)
+        plt.close()
         
-        time.sleep(0.6)
-        if curr_pos == GOAL:
-            st.balloons()
-            st.success("Goal Reached Safely!")
+        time.sleep(0.2)
+        if pos >= GOAL_X:
+            st.success("Target Reached!")
             break
+
+    st.line_chart(pd.DataFrame(history).set_index("Time")[["Velocity", "Position"]])
