@@ -1,76 +1,81 @@
-import random
+import streamlit as st
 import numpy as np
-from collections import defaultdict
+import random
 
-# ---------------------------
-# Environment (Grid World)
-# ---------------------------
-GRID = [
-    ['D','A','T','A'],
-    ['X','X','X','X'],
-    ['X','X','X','X'],
-    ['X','X','X','X']
-]
+st.title("🚦 Self-Driving Car: Traffic Signal RL")
 
-WORD = "DATA"
+# --- PARAMETERS ---
+ACTIONS = ["Stop", "Drive"]
+LIGHTS = ["Green", "Red"]
 
-ACTIONS = {
-    0:(-1,0),1:(1,0),2:(0,-1),3:(0,1),
-    4:(-1,-1),5:(-1,1),6:(1,-1),7:(1,1)
-}
+class TrafficAgent:
+    def __init__(self):
+        # Q-Table: [Light_State, Action]
+        self.q_table = np.zeros((2, 2)) 
+        self.lr = 0.1
+        self.gamma = 0.9
 
-Q = defaultdict(lambda: np.zeros(8))
+    def train(self, epochs):
+        log = []
+        for _ in range(epochs):
+            state = random.randint(0, 1) # 0: Green, 1: Red
+            action = random.randint(0, 1) # 0: Stop, 1: Drive
+            
+            # Reward Logic (Learning from mistakes)
+            if state == 1 and action == 1: # Red + Drive
+                reward = -100 # Penalty
+            elif state == 1 and action == 0: # Red + Stop
+                reward = 10   # Correct
+            elif state == 0 and action == 1: # Green + Drive
+                reward = 20   # Efficient
+            else: # Green + Stop
+                reward = -10  # Waste of time
+            
+            # Update Value Function (Q-learning)
+            self.q_table[state, action] += self.lr * (reward - self.q_table[state, action])
+        return self.q_table
 
-alpha = 0.1
-epsilon = 0.3
-episodes = 1000
+# --- UI ---
+epochs = st.sidebar.slider("Training Epochs (Learning Cycles)", 10, 1000, 100)
 
-# ---------------------------
-# Reward Function
-# ---------------------------
-def reward_fn(x,y,nx,ny,idx,visited):
-    n = len(GRID)
-    if nx<0 or ny<0 or nx>=n or ny>=n: return -5, idx
-    if (nx,ny) in visited: return -3, idx
-    if GRID[nx][ny] == WORD[idx]:
-        if idx == len(WORD)-1:
-            return 100, idx+1
-        return 10, idx+1
-    return -1, idx
+if 'agent' not in st.session_state:
+    st.session_state.agent = TrafficAgent()
 
-# ---------------------------
-# Policy
-# ---------------------------
-def choose(state):
-    if random.random() < epsilon:
-        return random.randint(0,7)
-    return np.argmax(Q[state])
+if st.sidebar.button("Train Car AI"):
+    st.session_state.q_table = st.session_state.agent.train(epochs)
+    st.sidebar.success("AI Trained!")
 
-# ---------------------------
-# Training Loop
-# ---------------------------
-for ep in range(episodes):
-    x,y = random.randint(0,3), random.randint(0,3)
-    idx = 0
-    visited = {(x,y)}
+# --- THE GAME ---
+st.subheader("Test the Driver")
+current_light = st.radio("Set Traffic Light:", ["Green", "Red"])
+light_idx = 0 if current_light == "Green" else 1
 
-    for step in range(50):
-        state = (x,y,idx)
-        action = choose(state)
+col1, col2 = st.columns(2)
 
-        dx,dy = ACTIONS[action]
-        nx,ny = x+dx, y+dy
+with col1:
+    if st.button("Manual: Drive"):
+        if current_light == "Red":
+            st.error("💥 CRASH! You jumped a red light.")
+        else:
+            st.success("✅ Smooth driving!")
 
-        r,new_idx = reward_fn(x,y,nx,ny,idx,visited)
+with col2:
+    if st.button("AI: Decide"):
+        if 'q_table' in st.session_state:
+            # Policy: Choose action with highest Value
+            ai_action_idx = np.argmax(st.session_state.q_table[light_idx])
+            ai_decision = ACTIONS[ai_action_idx]
+            st.write(f"AI chose to: **{ai_decision}**")
+            
+            if current_light == "Red" and ai_decision == "Drive":
+                st.error("AI Crashed! (Needs more epochs to learn)")
+            else:
+                st.success("AI handled the signal correctly!")
+        else:
+            st.warning("Train the AI first!")
 
-        Q[state][action] += alpha * (r - Q[state][action])
-
-        if r > -5:
-            x,y,idx = nx,ny,new_idx
-            visited.add((x,y))
-
-        if idx == len(WORD):
-            print(f"Episode {ep}: Word Found!")
-            break
-
-print("Training finished. Agent learned paths.")
+st.divider()
+st.write("### Learned Value Function (Q-Table)")
+if 'q_table' in st.session_state:
+    st.write(st.session_state.q_table)
+    st.caption("Rows: [Green, Red] | Columns: [Stop, Drive]")
