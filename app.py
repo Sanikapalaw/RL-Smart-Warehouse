@@ -2,96 +2,110 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import time
+import matplotlib.pyplot as plt
 
-# --- CONFIGURATION ---
-GRID_SIZE = 5
-START = (0, 0)
-GOAL = (4, 4)
-SIGNAL_POS = (2, 2)
+# --- CONSTANTS ---
+GOAL_X = 100.0
+SIGNAL_X = 50.0
+MAX_STEPS = 50
 
-class SelfDrivingCar:
+class ContinuousCarAgent:
     def __init__(self):
-        # Value Function: 5x5 grid, 4 possible actions (0:Up, 1:Down, 2:Left, 3:Right)
-        self.q_table = np.zeros((GRID_SIZE, GRID_SIZE, 4))
-        self.lr = 0.1  # Alpha
-        self.gamma = 0.9 # Discount
-        self.epsilon = 0.2 # Exploration for uncertainty
+        # Using a simplified Q-table by binning continuous values
+        # Bins: [Position (10), Velocity (5), Light (2), Action (3)]
+        # Actions: 0: Brake, 1: Coast, 2: Accelerate
+        self.q_table = np.zeros((11, 6, 2, 3)) 
+        self.lr = 0.1
+        self.gamma = 0.95
 
-    def train_epoch(self, signal_works=True):
-        state = START
-        total_reward = 0
+    def get_bins(self, pos, vel):
+        p_bin = int(min(pos, 99) // 10)
+        v_bin = int(min(max(vel, 0), 4))
+        return p_bin, v_bin
+
+    def train(self, epochs):
+        for _ in range(epochs):
+            pos, vel = 0.0, 0.0
+            light = 0 # 0: Green, 1: Red
+            
+            for _ in range(MAX_STEPS):
+                p_bin, v_bin = self.get_bins(pos, vel)
+                action = np.random.randint(0, 3)
+                
+                # Environment Uncertainty (Unpredictable physics)
+                noise = np.random.normal(0, 0.5) 
+                acceleration = (action - 1) * 2.0 + noise
+                
+                new_vel = max(0, vel + acceleration)
+                new_pos = pos + new_vel
+                
+                # Reward Logic (Chapter 3)
+                if new_pos >= GOAL_X:
+                    reward = 100
+                elif abs(new_pos - SIGNAL_X) < 5 and light == 1 and new_vel > 1:
+                    reward = -200 # Collision/Signal mistake
+                else:
+                    reward = -1 # Efficiency penalty
+
+                # Update Value Function
+                next_p, next_v = self.get_bins(new_pos, new_vel)
+                next_light = 1 if np.random.rand() > 0.8 else 0
+                old_val = self.q_table[p_bin, v_bin, light, action]
+                next_max = np.max(self.q_table[next_p, next_v, next_light])
+                
+                self.q_table[p_bin, v_bin, light, action] = \
+                    old_val + self.lr * (reward + self.gamma * next_max - old_val)
+                
+                pos, vel = new_pos, new_vel
+                if pos >= GOAL_X: break
+
+# --- GUI ---
+st.title("🏎️ Continuous Self-Driving (Unpredictable Env)")
+st.write("No grids here. The car uses physics and probability to learn.")
+
+if 'agent' not in st.session_state:
+    st.session_state.agent = ContinuousCarAgent()
+
+epochs = st.sidebar.number_input("Training Epochs", 100, 10000, 1000)
+if st.sidebar.button("Train Agent"):
+    with st.spinner("Learning physics and signal timing..."):
+        st.session_state.agent.train(epochs)
+    st.sidebar.success("Training Complete!")
+
+if st.button("Run Continuous Simulation"):
+    pos, vel = 0.0, 0.0
+    history = []
+    placeholder = st.empty()
+    
+    for t in range(MAX_STEPS):
+        # Logic: Switch light every 5 steps
+        light = 1 if (t // 5) % 2 == 1 else 0
+        p_bin, v_bin = st.session_state.agent.get_bins(pos, vel)
         
-        for _ in range(50): # Max steps to prevent infinite loops
-            # Policy Selection (Epsilon-Greedy from Chapter 2)
-            if np.random.uniform(0, 1) < self.epsilon:
-                action = np.random.randint(0, 4)
-            else:
-                action = np.argmax(self.q_table[state[0], state[1]])
+        # Policy: Best action from Q-table
+        action = np.argmax(st.session_state.agent.q_table[p_bin, v_bin, light])
+        
+        # Physics with Noise
+        noise = np.random.normal(0, 0.2)
+        vel = max(0, vel + (action - 1) * 2.0 + noise)
+        pos += vel
+        
+        history.append({"Time": t, "Position": pos, "Velocity": vel, "Light": "Red" if light else "Green"})
+        
+        # Draw Visuals
+        fig, ax = plt.subplots(figsize=(10, 2))
+        ax.set_xlim(0, 110)
+        ax.set_ylim(-1, 1)
+        ax.axvline(SIGNAL_X, color='red' if light else 'green', linestyle='--', label="Signal")
+        ax.axvline(GOAL_X, color='gold', linewidth=3, label="Goal")
+        ax.scatter([pos], [0], color='blue', s=200, marker='s', label="Car")
+        ax.legend()
+        placeholder.pyplot(fig)
+        plt.close()
+        
+        time.sleep(0.2)
+        if pos >= GOAL_X:
+            st.success("Target Reached!")
+            break
 
-            # Move Logic with Uncertainty (Signal Not Working)
-            if not signal_works and np.random.rand() < 0.3:
-                # 30% chance the move is random if signal is broken
-                action = np.random.randint(0, 4)
-
-            # Calculate next state
-            new_r, new_c = state
-            if action == 0 and state[0] > 0: new_r -= 1
-            elif action == 1 and state[0] < GRID_SIZE-1: new_r += 1
-            elif action == 2 and state[1] > 0: new_c -= 1
-            elif action == 3 and state[1] < GRID_SIZE-1: new_c += 1
-            
-            # Reward Signal (Learning from mistakes)
-            if (new_r, new_c) == GOAL:
-                reward = 100
-            elif (new_r, new_c) == SIGNAL_POS and not signal_works:
-                reward = -50 # Penalty for hitting the broken signal area
-            else:
-                reward = -1 # Small step cost
-
-            # Update Value Function
-            old_value = self.q_table[state[0], state[1], action]
-            next_max = np.max(self.q_table[new_r, new_c])
-            self.q_table[state[0], state[1], action] = old_value + self.lr * (reward + self.gamma * next_max - old_value)
-            
-            state = (new_r, new_c)
-            total_reward += reward
-            if state == GOAL: break
-            
-        return total_reward
-
-# --- STREAMLIT UI ---
-st.title("🚗 Training Lab: Epochs & Values")
-
-if 'car' not in st.session_state:
-    st.session_state.car = SelfDrivingCar()
-    st.session_state.history = []
-
-# Training Interface
-st.sidebar.header("Agent Brain")
-num_epochs = st.sidebar.number_input("How many Epochs?", min_value=10, max_value=5000, value=100)
-signal_status = st.sidebar.checkbox("Signal is Working", value=False)
-
-if st.sidebar.button("Run Training"):
-    progress = st.progress(0)
-    for i in range(num_epochs):
-        reward = st.session_state.car.train_epoch(signal_status)
-        st.session_state.history.append(reward)
-        if i % (num_epochs // 10) == 0:
-            progress.progress(i / num_epochs)
-    st.sidebar.success(f"Trained for {num_epochs} Epochs!")
-
-# Results GUI
-st.subheader("Training Progress (Learning from Mistakes)")
-if st.session_state.history:
-    # Plotting how the reward increases as the agent learns
-    chart_data = pd.DataFrame(st.session_state.history, columns=["Total Reward"])
-    st.line_chart(chart_data)
-    st.caption("As the line goes up, the agent is making fewer mistakes (like hitting the signal or getting lost).")
-
-# Visual Grid
-st.subheader("Learned Policy Map")
-# Display the best move for each square
-best_moves = np.argmax(st.session_state.car.q_table, axis=2)
-move_icons = {0: "⬆️", 1: "⬇️", 2: "⬅️", 3: "➡️"}
-grid_display = [[move_icons[best_moves[r,c]] for c in range(GRID_SIZE)] for r in range(GRID_SIZE)]
-st.table(pd.DataFrame(grid_display))
+    st.line_chart(pd.DataFrame(history).set_index("Time")[["Velocity", "Position"]])
